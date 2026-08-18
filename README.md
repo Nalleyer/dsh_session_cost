@@ -1,0 +1,98 @@
+# dsh-session-cost
+
+DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**之下，追加一行
+「本会话消耗」，按 DeepSeek 官方政策（含峰谷定价）实时计费，人民币 / 美元随界面语言切换。
+
+> 计费引擎（纯函数）与价格数据分离：`lib/pricing.js` 只含取价逻辑，**价格数据全部在
+> `lib/pricing-data.json`**（由插件作者随官方调价维护，不写在代码里）。展示形态独立实现，
+> 只落在底部信息栏的一行里。仅支持官方两个模型 `deepseek-v4-flash` / `deepseek-v4-pro`。
+
+## 效果
+
+- 默认信息栏（stats 行）保持第一行不变；本插件注册为 `conversation.composer.dock`
+  的 `order: 1` 条目，自然渲染为**第二行**。
+- 第二行显示内容（紧凑一行）：
+
+  ```
+  ¥0.0123 · 高峰        （空闲时段则显示「空闲」）
+  ```
+
+  - 金额：双币种，按配置 / 界面语言决定展示人民币还是美元。
+  - 角标 `高峰` / `空闲`：来自最近一条 assistant 消息的计价模式（2026-08-17 起的峰谷定价）。
+  - **仅官方两个模型**（deepseek-v4-flash / deepseek-v4-pro）显示；其它模型的会话不显示第二行。
+
+## 计费方法（峰谷）
+
+- 订阅 `session/event`，对每条带 `usage` 的 `assistant/message` **按消息完成时刻取价**。
+- 峰谷时段（北京时间，`Asia/Shanghai`，与官方一致）：
+  - **高峰** `09:00–12:00`、`14:00–18:00`
+  - **空闲**（其余时段）：单价为高峰的**一半**。
+- 政策链继承：新政策上线后，存量消息按各自时刻重新计价（重启自愈）。
+- **价格数据在 `lib/pricing-data.json`**：官方调价时，插件作者直接更新该文件（无需改逻辑代码）。
+  包含时间轴（`policies`）、峰谷窗口（`peakWindows`）、支持的模型（`models`）。
+- 普通用户**不可**覆盖价格：不提供 `prices` / `policyOverrides` 等覆盖入口。
+
+## 人民币 / 美元
+
+`displayCurrency: auto`（默认）跟随界面语言：英文界面显示 USD，其余显示 CNY；
+配置为 `CNY` / `USD` 则强制指定。计费时双币种同时算，`/session-cost/session/<id>`
+返回 `cost` 与 `costUsd`，由客户端按上述规则择一展示。
+
+## 安装
+
+插件是一个标准 **DSH 组合包（bundle）**（`dsh.bundle.patch` 指向包内 `cordis.patch.yml`）。
+
+```bash
+# 从 GitHub 安装（上传后）
+dsh plugin --profile web add github:<owner>/dsh-session-cost
+
+# 或从 npm 安装（发布后）
+dsh plugin --profile web add dsh-session-cost
+
+# 本地开发：把 checkout 以 junction 链接进 profile（无需先上 GitHub）
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
+```
+
+- 本地安装脚本会创建 `$DSH_HOME/profiles/web/node_modules/dsh-session-cost` 指向本仓库，
+  并把 `dsh-session-cost` 加入 profile 的 `dsh.profile.bundles`。
+- 安装后**重启 `dsh web`** 生效。
+- 浏览器端 bundle 为手写模块（与 DSH 官方 client 插件同格式），修改后**刷新页面 + 重启 `dsh web`** 生效；host 端修改需重启。
+
+## 端点（仅回环，host 侧）
+
+```
+GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, supported, displayCurrency }
+```
+
+- `supported: false` 表示该会话含非官方两个模型的消息，第二行不显示。
+
+## 配置（cordis.patch.yml）
+
+仅展示相关，不含价格覆盖：
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `displayCurrency` | `auto` | `auto`=跟随界面语言（英文显示 USD）；`CNY`/`USD`=强制 |
+| `currency` / `symbol` / `symbolUsd` | `CNY` / `¥` / `$` | 展示符号 |
+| `persistPath` | `$DSH_HOME/storages/session-cost.json` | 账本路径 |
+| `loopbackOnly` | `true` | 端点仅回环可访问 |
+
+价格数据不在用户配置里——改价请编辑 `lib/pricing-data.json`（插件作者职责）。
+
+## 开发
+
+```bash
+npm run check   # node --check 各 lib 文件
+npm test        # node --test 验证峰谷计价
+```
+
+## 目录
+
+```
+lib/pricing.js        计费引擎（纯函数，无价格数据）
+lib/pricing-data.json 价格数据（官方两模型的政策时间表 + 峰谷窗口，作者维护）
+lib/index.js          host 侧：记账 + /session-cost 端点
+lib/client.js         浏览器侧：composer.dock 第二行信息栏
+cordis.patch.yml      组合包配置层
+test/                峰谷计价单测
+```
