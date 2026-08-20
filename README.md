@@ -46,7 +46,7 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
 ```bash
 # 从 GitHub 安装（上传后）
-dsh plugin --profile web add github:bpc-oss/dsh-session-cost
+dsh plugin --profile web add https://github.com/Nalleyer/dsh_session_cost
 
 # 或从 npm 安装（发布后）
 dsh plugin --profile web add dsh-session-cost

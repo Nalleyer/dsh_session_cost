@@ -28,7 +28,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bpc-oss/dsh-session-cost.git"
+    "url": "git+https://github.com/Nalleyer/dsh_session_cost.git"
   },
   "engines": {
     "node": ">=20"

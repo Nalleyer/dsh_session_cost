@@ -10,7 +10,7 @@
 # - 创建 $DshHome/profiles/<Profile>/node_modules/dsh-session-cost 指向本仓库的
 #   junction，并把包加入 profile 的 `dsh.profile.bundles`（其 cordis.patch.yml
 #   即提供插件行）。正式分发安装推荐官方方式：
-#   `dsh plugin --profile <name> add github:<owner>/dsh-session-cost`。
+#   `dsh plugin --profile <name> add https://github.com/Nalleyer/dsh_session_cost`。
 # - 创建 $DshHome/profiles/<Profile>/node_modules/dsh-session-cost as a junction
 #   pointing at this repository, and appends the package to the profile's
 #   `dsh.profile.bundles` (its cordis.patch.yml then supplies the plugin row).
