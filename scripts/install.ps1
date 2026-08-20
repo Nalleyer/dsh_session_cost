@@ -26,6 +26,16 @@ if ($DshHome -eq "") {
     $DshHome = if ($env:DSH_HOME -and $env:DSH_HOME.Trim() -ne "") { $env:DSH_HOME } else { Join-Path $HOME ".dsh" }
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$profileDir = Join-Path $DshHome "profiles\$Profile"
+$manifestPath = Join-Path $profileDir "package.json"
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "DSH profile '$Profile' is not initialized at '$profileDir'. Run 'dsh web' once (or initialize this profile with dsh) and retry."
+}
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if ($null -eq $manifest.dsh -or $null -eq $manifest.dsh.profile -or $null -eq $manifest.dsh.profile.bundles) {
+    throw "DSH profile manifest '$manifestPath' has no dsh.profile.bundles list."
+}
+
 $linkDir = Join-Path $DshHome "profiles\$Profile\node_modules"
 $link = Join-Path $linkDir "dsh-session-cost"
 
@@ -45,20 +55,14 @@ Write-Host "Linked: $link -> $repoRoot"
 
 # Register the bundle layer so its cordis.patch.yml supplies the plugin row.
 # 注册组合包层，使其 cordis.patch.yml 提供插件行。
-$manifestPath = Join-Path $DshHome "profiles\$Profile\package.json"
-if (Test-Path $manifestPath) {
-    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-    $bundles = @($manifest.dsh.profile.bundles)
-    if ($bundles -notcontains "dsh-session-cost") {
-        $manifest.dsh.profile.bundles = @($bundles + "dsh-session-cost")
-        # 关键：PowerShell 5.1 的 Set-Content -Encoding utf8 会写入 BOM，导致 dsh
-        # 解析 package.json 失败。改用 .NET UTF8Encoding(false) 写出无 BOM 的 UTF-8。
-        $json = $manifest | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
-        Write-Host "Added dsh-session-cost to dsh.profile.bundles in $manifestPath"
-    }
-} else {
-    Write-Host "WARNING: $manifestPath not found; add 'dsh-session-cost' to dsh.profile.bundles manually."
+$bundles = @($manifest.dsh.profile.bundles)
+if ($bundles -notcontains "dsh-session-cost") {
+    $manifest.dsh.profile.bundles = @($bundles + "dsh-session-cost")
+    # 关键：PowerShell 5.1 的 Set-Content -Encoding utf8 会写入 BOM，导致 dsh
+    # 解析 package.json 失败。改用 .NET UTF8Encoding(false) 写出无 BOM 的 UTF-8。
+    $json = $manifest | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "Added dsh-session-cost to dsh.profile.bundles in $manifestPath"
 }
 
 Write-Host "Done. Restart 'dsh web' to activate. / 完成，重启 'dsh web' 生效。"

@@ -16,9 +16,9 @@
     - id: session-cost
       name: dsh-session-cost
       config:
-        currency: CNY
         symbol: '¥'
         symbolUsd: '$'
         displayCurrency: auto
         # persistPath: ...                 # 账本路径（默认 $DSH_HOME/storages/session-cost.json）
+        # maxMessagesPerSession: 2000       # 保留逐条明细数（影响未来调价重算）
         # loopbackOnly: true               # /session-cost 端点仅回环可访问（默认开）

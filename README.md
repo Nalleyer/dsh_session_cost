@@ -27,7 +27,8 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 - 峰谷时段（北京时间，`Asia/Shanghai`，与官方一致）：
   - **高峰** `09:00–12:00`、`14:00–18:00`
   - **空闲**（其余时段）：单价为高峰的**一半**。
-- 政策链继承：新政策上线后，存量消息按各自时刻重新计价（重启自愈）。
+- 政策链继承：重启后，保留的消息明细按各自时刻重新计价（重启自愈）。超过
+  `maxMessagesPerSession` 的裁剪历史只保留当时的聚合金额，不再逐条重算。
 - **价格数据在 `lib/pricing-data.json`**：官方调价时，插件作者直接更新该文件（无需改逻辑代码）。
   包含时间轴（`policies`）、峰谷窗口（`peakWindows`）、支持的模型（`models`）。
 - 普通用户**不可**覆盖价格：不提供 `prices` / `policyOverrides` 等覆盖入口。
@@ -36,7 +37,8 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
 `displayCurrency: auto`（默认）跟随界面语言：英文界面显示 USD，其余显示 CNY；
 配置为 `CNY` / `USD` 则强制指定。计费时双币种同时算，`/session-cost/session/<id>`
-返回 `cost` 与 `costUsd`，由客户端按上述规则择一展示。
+返回 `cost` 与 `costUsd`，由客户端按上述规则择一展示；展示符号取配置
+`symbol` / `symbolUsd`（默认 `¥` / `$`）。
 
 ## 安装
 
@@ -44,24 +46,25 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
 ```bash
 # 从 GitHub 安装（上传后）
-dsh plugin --profile web add github:<owner>/dsh-session-cost
+dsh plugin --profile web add github:bpc-oss/dsh-session-cost
 
 # 或从 npm 安装（发布后）
 dsh plugin --profile web add dsh-session-cost
 
-# 本地开发：把 checkout 以 junction 链接进 profile（无需先上 GitHub）
+# 本地开发：把 checkout 以 junction 链接进已初始化的 profile（无需先上 GitHub）
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
 ```
 
+- 本地安装助手要求目标 profile 已由 DSH 初始化；全新环境先运行一次 `dsh web`，再执行脚本。
 - 本地安装脚本会创建 `$DSH_HOME/profiles/web/node_modules/dsh-session-cost` 指向本仓库，
   并把 `dsh-session-cost` 加入 profile 的 `dsh.profile.bundles`。
 - 安装后**重启 `dsh web`** 生效。
 - 浏览器端 bundle 为手写模块（与 DSH 官方 client 插件同格式），修改后**刷新页面 + 重启 `dsh web`** 生效；host 端修改需重启。
 
-## 端点（仅回环，host 侧）
+## 端点（默认仅回环，host 侧）
 
 ```
-GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, supported, displayCurrency }
+GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, supported, displayCurrency, symbol, symbolUsd }
 ```
 
 - `supported: false` 表示该会话含非官方两个模型的消息，第二行不显示。
@@ -73,8 +76,9 @@ GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, s
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `displayCurrency` | `auto` | `auto`=跟随界面语言（英文显示 USD）；`CNY`/`USD`=强制 |
-| `currency` / `symbol` / `symbolUsd` | `CNY` / `¥` / `$` | 展示符号 |
+| `symbol` / `symbolUsd` | `¥` / `$` | 人民币 / 美元展示符号 |
 | `persistPath` | `$DSH_HOME/storages/session-cost.json` | 账本路径 |
+| `maxMessagesPerSession` | `2000` | 每个会话保留的逐条明细数；越大越利于未来调价重算 |
 | `loopbackOnly` | `true` | 端点仅回环可访问 |
 
 价格数据不在用户配置里——改价请编辑 `lib/pricing-data.json`（插件作者职责）。
@@ -94,5 +98,5 @@ lib/pricing-data.json 价格数据（官方两模型的政策时间表 + 峰谷�
 lib/index.js          host 侧：记账 + /session-cost 端点
 lib/client.js         浏览器侧：composer.dock 第二行信息栏
 cordis.patch.yml      组合包配置层
-test/                峰谷计价单测
+test/                峰谷计价与账本单测
 ```

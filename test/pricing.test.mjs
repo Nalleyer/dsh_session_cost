@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isPeak, priceAt, costOf } from "../lib/pricing.js";
+import { isPeak, priceAt, costOf, zeroTrimmed, addTrimmed } from "../lib/pricing.js";
 
 // 价格数据来自数据文件（不写在代码里），此处直接读取以保持单一事实来源。
 const DATA = JSON.parse(
@@ -64,4 +64,37 @@ test("costOf：按 token 与单价计算双币种费用", () => {
   assert.equal(cost.costUsd, 0.44);
   const cost2 = costOf({ inputTokens: 0, cacheReadTokens: 2_000_000, outputTokens: 500_000 }, unit);
   assert.equal(cost2.cost, 2 * 0.1 + 0.5 * 9);
+});
+
+test("costOf：异常 token 值不会污染费用", () => {
+  const unit = { cny: { input: 1, cacheRead: 1, output: 1 }, usd: { input: 1, cacheRead: 1, output: 1 } };
+  assert.deepEqual(costOf({ inputTokens: Number.NaN, cacheReadTokens: -1, outputTokens: Infinity }, unit), {
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 0,
+    cost: 0,
+    costUsd: 0
+  });
+});
+
+test("zeroTrimmed / addTrimmed：裁剪聚合按实际数值并入", () => {
+  const t = zeroTrimmed();
+  assert.equal(t.calls, 0);
+  assert.equal(t.cost, 0);
+  addTrimmed(t, {
+    calls: 3, cost: 1.5, costUsd: 0.2, costNominal: 1.5, costNominalUsd: 0.2,
+    savings: 0.5, savingsUsd: 0.07, inputTokens: 100, cacheReadTokens: 200, outputTokens: 50
+  });
+  assert.equal(t.calls, 3);
+  assert.equal(t.cost, 1.5);
+  assert.equal(t.costUsd, 0.2);
+  assert.equal(t.costNominal, 1.5);
+  assert.equal(t.savings, 0.5);
+  assert.equal(t.inputTokens, 100);
+  assert.equal(t.cacheReadTokens, 200);
+  assert.equal(t.outputTokens, 50);
+  addTrimmed(t, { calls: 1, cost: 2, costUsd: 0.3 });
+  assert.equal(t.calls, 4);
+  assert.equal(t.cost, 3.5);
+  assert.equal(t.costUsd, 0.5);
 });
