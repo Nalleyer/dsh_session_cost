@@ -5,7 +5,8 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
 > 计费引擎（纯函数）与价格数据分离：`lib/pricing.js` 只含取价逻辑，**价格数据全部在
 > `lib/pricing-data.json`**（由插件作者随官方调价维护，不写在代码里）。展示形态独立实现，
-> 只落在底部信息栏的一行里。仅支持官方两个模型 `deepseek-v4-flash` / `deepseek-v4-pro`。
+> 只落在底部信息栏的一行里。仅支持官方三个模型 `deepseek-v4-flash` / `deepseek-v4-pro` /
+> `deepseek-v4-flash-vision-exp`。
 
 ## 效果
 
@@ -19,7 +20,7 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
   - 金额：双币种，按配置 / 界面语言决定展示人民币还是美元。
   - 角标 `高峰` / `空闲`：来自最近一条 assistant 消息的计价模式（2026-08-17 起的峰谷定价）。
-  - **仅官方两个模型**（deepseek-v4-flash / deepseek-v4-pro）显示；其它模型的会话不显示第二行。
+  - **仅官方三个模型**（deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp）显示；其它模型的会话不显示第二行。
 
 ## 计费方法（峰谷）
 
@@ -67,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
 GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, supported, displayCurrency, symbol, symbolUsd }
 ```
 
-- `supported: false` 表示该会话含非官方两个模型的消息，第二行不显示。
+- `supported: false` 表示该会话含非官方三个模型的消息，第二行不显示。
 
 ## 配置（cordis.patch.yml）
 
@@ -94,7 +95,7 @@ npm test        # node --test 验证峰谷计价
 
 ```
 lib/pricing.js        计费引擎（纯函数，无价格数据）
-lib/pricing-data.json 价格数据（官方两模型的政策时间表 + 峰谷窗口，作者维护）
+lib/pricing-data.json 价格数据（官方三模型的政策时间表 + 峰谷窗口，作者维护）
 lib/index.js          host 侧：记账 + /session-cost 端点
 lib/client.js         浏览器侧：composer.dock 第二行信息栏
 cordis.patch.yml      组合包配置层

@@ -1,7 +1,7 @@
 {
   "timezone": "Asia/Shanghai",
   "peakWindows": [[9, 12], [14, 18]],
-  "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+  "models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
   "policies": [
     {
       "since": "2026-05-22T00:00:00+08:00",
@@ -28,6 +28,10 @@
         "deepseek-v4-pro": {
           "cny": { "input": 9, "cacheRead": 0.3, "output": 27 },
           "usd": { "input": 1.32, "cacheRead": 0.044, "output": 3.96 }
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "cny": { "input": 3, "cacheRead": 0.1, "output": 9 },
+          "usd": { "input": 0.44, "cacheRead": 0.014, "output": 1.32 }
         }
       },
       "offPeak": {
@@ -38,6 +42,10 @@
         "deepseek-v4-pro": {
           "cny": { "input": 4.5, "cacheRead": 0.15, "output": 13.5 },
           "usd": { "input": 0.66, "cacheRead": 0.022, "output": 1.98 }
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "cny": { "input": 1.5, "cacheRead": 0.05, "output": 4.5 },
+          "usd": { "input": 0.22, "cacheRead": 0.007, "output": 0.66 }
         }
       }
     }

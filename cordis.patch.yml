@@ -5,10 +5,11 @@
 # 之后应用；用户可在自己的 profile `cordis.patch.yml` 里按 id 覆盖本层任意行。
 #
 # 功能：在聊天界面底部默认信息栏（conversation.composer.dock）之下追加「本会话消耗」
-# 第二行——仅支持官方两个模型（deepseek-v4-flash / deepseek-v4-pro），按每条
+# 第二行——仅支持官方三个模型（deepseek-v4-flash / deepseek-v4-pro /
+# deepseek-v4-flash-vision-exp），按每条
 # assistant 消息完成时刻取价（含 2026-08-17 起的峰谷定价：高峰 09:00–12:00 /
 # 14:00–18:00 北京时间，空闲半价），人民币/美元随界面语言（或配置）切换。
-# 非这两个模型的会话不显示第二行。价格数据维护在 lib/pricing-data.json，由插件作者随
+# 非这三个模型的会话不显示第二行。价格数据维护在 lib/pricing-data.json，由插件作者随
 # 官方调价更新；普通用户无需、也不能覆盖价格。
 #
 # displayCurrency: auto=跟随界面语言（英文界面显示 USD）；CNY/USD=强制指定展示币种。

@@ -25,8 +25,12 @@ const T_PEAK2 = bj(2026, 8, 17, 15, 0);  // 15:00 CST ∈ [14,18) 高峰
 const T_OFF = bj(2026, 8, 17, 20, 0);    // 20:00 CST 空闲
 const T_FLAT = bj(2026, 6, 1, 10, 0);    // 2026-05-22 之后、峰谷之前 → 平价
 
-test("支持的模型为官方两个 V4 模型", () => {
-  assert.deepEqual([...models].sort(), ["deepseek-v4-flash", "deepseek-v4-pro"].sort());
+test("支持的模型为官方三个 V4 模型", () => {
+  assert.deepEqual([...models].sort(), [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp"
+  ].sort());
 });
 
 test("isPeak 按北京时间窗口判定", () => {
@@ -47,6 +51,17 @@ test("priceAt：峰谷时段返回对应单价与 mode", () => {
   assert.equal(off.mode, "offPeak");
   assert.equal(off.cny.input, 1.5); // 空闲 = 高峰半价
   assert.equal(off.cny.output, 4.5);
+});
+
+test("priceAt：deepseek-v4-flash-vision-exp 与 flash 同价（高峰/空闲，双币种）", () => {
+  for (const [time, mode] of [[T_PEAK, "peak"], [T_OFF, "offPeak"]]) {
+    const flash = priceAt("deepseek-v4-flash", time, { timezone, peakWindows, policies });
+    const vision = priceAt("deepseek-v4-flash-vision-exp", time, { timezone, peakWindows, policies });
+    assert.equal(vision.mode, mode);
+    assert.deepEqual(vision.cny, flash.cny); // 官网：vision-exp 价格 = flash 价格
+    assert.deepEqual(vision.usd, flash.usd);
+    assert.equal(vision.cny.cacheRead, mode === "peak" ? 0.1 : 0.05); // 缓存命中价
+  }
 });
 
 test("priceAt：峰谷之前的时段为平价（flat）", () => {
