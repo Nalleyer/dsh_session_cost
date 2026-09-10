@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-cost",
-  "version": "1.0.0",
-  "description": "Concise per-session token-cost line in the DSH web chat footer: official peak/off-peak pricing, RMB/USD by UI locale. Adds a second line under the default composer info bar.",
+  "version": "1.1.0",
+  "description": "Concise per-session token-cost line in the DSH web chat footer: official peak/off-peak pricing (weekday-aware) with model-name routing, RMB/USD by UI locale. Adds a second line under the default composer info bar.",
   "keywords": [
     "dsh",
     "deepseek-harness",

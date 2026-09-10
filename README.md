@@ -5,8 +5,9 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
 > 计费引擎（纯函数）与价格数据分离：`lib/pricing.js` 只含取价逻辑，**价格数据全部在
 > `lib/pricing-data.json`**（由插件作者随官方调价维护，不写在代码里）。展示形态独立实现，
-> 只落在底部信息栏的一行里。仅支持官方三个模型 `deepseek-v4-flash` / `deepseek-v4-pro` /
-> `deepseek-v4-flash-vision-exp`。
+> 只落在底部信息栏的一行里。支持官方在售及兼容期内的模型：`deepseek-flash`（V4.1 Flash）、
+> `deepseek-v4-pro`，以及已下线但仍可调用的旧名 `deepseek-v4-flash` /
+> `deepseek-v4-flash-vision-exp`（官方将旧名请求路由至 V4.1 Flash，按 Flash 单价计费）。
 
 ## 效果
 
@@ -20,18 +21,26 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏**
 
   - 金额：双币种，按配置 / 界面语言决定展示人民币还是美元。
   - 角标 `高峰` / `空闲`：来自最近一条 assistant 消息的计价模式（2026-08-17 起的峰谷定价）。
-  - **仅官方三个模型**（deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp）显示；其它模型的会话不显示第二行。
+  - **仅上列官方模型**（`deepseek-flash` / `deepseek-v4-pro` / `deepseek-v4-flash` /
+    `deepseek-v4-flash-vision-exp`）显示；其它模型的会话不显示第二行。
 
-## 计费方法（峰谷）
+## 计费方法（峰谷 + 模型路由）
 
 - 订阅 `session/event`，对每条带 `usage` 的 `assistant/message` **按消息完成时刻取价**。
 - 峰谷时段（北京时间，`Asia/Shanghai`，与官方一致）：
-  - **高峰** `09:00–12:00`、`14:00–18:00`
-  - **空闲**（其余时段）：单价为高峰的**一半**。
+  - **高峰**：**周一至周五** `09:00–12:00`、`14:00–18:00`
+  - **空闲**（其余时段，含**周末全天**）：单价为高峰的**一半**。
+- **模型名路由**：官方下线模型后常保留旧模型名的兼容期，此时请求由新模型提供服务、并按
+  新模型单价计费。路由写在数据文件的 `policies[].routes`（`{ 请求名: 实际计费名 }`）：
+  - 2026-09-10 起：`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` → `deepseek-flash`
+  - 2026-09-14 12:00 起（至 V4.1 Pro 上线前）：`deepseek-v4-pro` → `deepseek-flash`
+  被路由的名字**不重复写价**，单价由目标模型在政策链上的价格行决定，避免同一组数字多处维护。
 - 政策链继承：重启后，保留的消息明细按各自时刻重新计价（重启自愈）。超过
   `maxMessagesPerSession` 的裁剪历史只保留当时的聚合金额，不再逐条重算。
 - **价格数据在 `lib/pricing-data.json`**：官方调价时，插件作者直接更新该文件（无需改逻辑代码）。
-  包含时间轴（`policies`）、峰谷窗口（`peakWindows`）、支持的模型（`models`）。
+  包含时间轴（`policies`，含可选 `routes`）、峰谷窗口（`peakWindows`）、高峰星期
+  （`peakWeekdays`，周一 1 … 周日 7；缺省/空数组表示不限星期）、支持的模型（`models`），
+  以及核对来源（`source`）。
 - 普通用户**不可**覆盖价格：不提供 `prices` / `policyOverrides` 等覆盖入口。
 
 ## 人民币 / 美元
@@ -68,7 +77,10 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
 GET /session-cost/session/<id>   → { ok, sessionId, cost, costUsd, lastMode, supported, displayCurrency, symbol, symbolUsd }
 ```
 
-- `supported: false` 表示该会话含非官方三个模型的消息，第二行不显示。
+- `supported: false` 表示该会话含**不被支持模型**的消息（具体模型名记在账本里），第二行不显示。
+  官方改名 / 新增模型后（本插件的价格数据版本随之变化）会重新判定该标记：曾因旧模型名被
+  标记的会话自动恢复显示；旧版账本没记模型名的标记，只在会话没有任何可用明细时清除，
+  有明细的会话保守保留——避免显示出「只算了部分模型」的片面金额。
 
 ## 配置（cordis.patch.yml）
 
