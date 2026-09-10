@@ -17,8 +17,8 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SessionCostLedger, recordSessionEvent } from "../lib/index.js";
-import { priceAt, zeroCounts, zeroTrimmed } from "../lib/pricing.js";
+import { SessionCostLedger, detailPayload, recordSessionEvent } from "../lib/index.js";
+import { nextPeakTransition, priceAt, zeroCounts, zeroTrimmed } from "../lib/pricing.js";
 
 // 价格数据来自数据文件（不写在代码里），此处直接读取以保持单一事实来源。
 const DATA = JSON.parse(
@@ -32,9 +32,12 @@ const bj = (y, mo, d, h, mi = 0) => Date.UTC(y, mo - 1, d, h - 8, mi);
 function makePricing(hash) {
   return {
     hash,
-    at: (model, time) => priceAt(model, time, { timezone, peakWindows, peakWeekdays, policies })
+    at: (model, time) => priceAt(model, time, { timezone, peakWindows, peakWeekdays, policies }),
+    next: (time) => nextPeakTransition(time, timezone, peakWindows, peakWeekdays)
   };
 }
+
+const CONFIG = { displayCurrency: "auto", symbol: "¥", symbolUsd: "$" };
 
 const cleanups = [];
 after(async () => {
@@ -137,7 +140,7 @@ test("markUnsupported 记录模型名并落盘（供下次调价重估判定）"
   assert.equal(saved.sessions.s13.unsupported, true);
 });
 
-test("不支持模型即使没有 usage 也隐藏第二行", () => {
+test("不支持模型即使没有 usage 也隐藏角标", () => {
   const ledger = makeLedger(10);
   recordSessionEvent(ledger, new Map(), { id: "s10" }, {
     type: "assistant/message",
@@ -164,7 +167,7 @@ test("flush 会创建不存在的账本父目录", async () => {
   assert.equal(saved.sessions.s11.calls, 1);
 });
 
-test("deepseek-flash（V4.1）属支持模型：正常记账，不再隐藏第二行", () => {
+test("deepseek-flash（V4.1）属支持模型：正常记账，不再隐藏角标", () => {
   const ledger = makeLedger(10);
   recordSessionEvent(ledger, new Map(), { id: "sNew" }, {
     type: "assistant/message",
@@ -249,4 +252,103 @@ test("写盘期间的新记录会在同一轮 flush 中保存", async () => {
   assert.equal(writes, 2);
   assert.equal(saved.sessions.s12.calls, 2);
   assert.ok(saved.sessions.s12.messages.m2);
+});
+
+test("detail：按模型与时段聚合，并给出首末计费点（含路由后的计费名）", () => {
+  const ledger = makeLedger(10);
+  const peakTime = bj(2026, 9, 10, 10, 0); // 周四 10:00 高峰
+  const offTime = bj(2026, 9, 10, 20, 0); // 周四 20:00 空闲
+  const bill = (messageId, model, time) => ledger.record({
+    sessionId: "sDetail",
+    messageId,
+    time,
+    provider: "deepseek",
+    model,
+    ...ledger.price(model, "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+  });
+  bill("m1", "deepseek-flash", peakTime);
+  bill("m2", "deepseek-v4-pro", offTime); // 2026-09-14 之前：v4-pro 仍按自己的价格计费
+
+  const detail = ledger.detail("sDetail");
+  assert.equal(detail.calls, 2);
+  assert.equal(detail.firstTime, peakTime);
+  assert.equal(detail.lastTime, offTime);
+  assert.equal(detail.lastModel, "deepseek-v4-pro");
+  assert.equal(detail.lastBilledAs, "deepseek-v4-pro");
+  assert.equal(detail.supported, true);
+
+  // 时段聚合：高峰 1 次（flash 输入 ¥2/1M），空闲 1 次（v4-pro 空闲输入 ¥4.5/1M）。
+  assert.equal(detail.modes.peak.calls, 1);
+  assert.equal(detail.modes.peak.cost, 2);
+  assert.equal(detail.modes.offPeak.calls, 1);
+  assert.equal(detail.modes.offPeak.cost, 4.5);
+  assert.equal(detail.modes.flat.calls, 0);
+
+  // 模型聚合：两个模型各一行，按费用降序。
+  assert.equal(detail.models.length, 2);
+  assert.equal(detail.models[0].model, "deepseek-v4-pro");
+  assert.equal(detail.models[0].inputTokens, 1_000_000);
+  assert.equal(detail.models[1].model, "deepseek-flash");
+  assert.equal(detail.models[1].cost, 2);
+});
+
+test("detail：路由生效后同一次请求的模型名与实际计费名分列保留", () => {
+  const ledger = makeLedger(10);
+  const time = bj(2026, 9, 14, 20, 0); // 周一 20:00：v4-pro 已路由至 V4.1 Flash
+  ledger.record({
+    sessionId: "sRouted",
+    messageId: "m1",
+    time,
+    provider: "deepseek",
+    model: "deepseek-v4-pro",
+    ...ledger.price("deepseek-v4-pro", "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+  });
+  const detail = ledger.detail("sRouted");
+  assert.equal(detail.models[0].model, "deepseek-v4-pro");
+  assert.equal(detail.models[0].billedAs, "deepseek-flash");
+  assert.equal(detail.models[0].cost, 1); // 空闲 Flash 输入价 ¥1 / 1M
+});
+
+test("detail：无此会话返回 undefined（端点据此回零聚合）", () => {
+  const ledger = makeLedger(10);
+  assert.equal(ledger.detail("missing"), void 0);
+});
+
+test("detailPayload：空会话给零聚合，不臆造单价", () => {
+  const now = bj(2026, 9, 10, 10, 0); // 高峰时段内
+  const payload = detailPayload(void 0, "empty", now, P1, CONFIG);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.sessionId, "empty");
+  assert.equal(payload.calls, 0);
+  assert.equal(payload.cost, 0);
+  assert.equal(payload.pricing, null);
+  assert.equal(payload.cacheHitPercent, null);
+  assert.equal(payload.displayCurrency, "auto");
+  assert.equal(payload.symbol, "¥");
+  // 10:00 高峰 → 下一处切换为 12:00 转空闲。
+  assert.equal(payload.nextSwitch.at, bj(2026, 9, 10, 12, 0));
+  assert.equal(payload.nextSwitch.mode, "offPeak");
+});
+
+test("detailPayload：单价按最近模型的当前时刻取（即下一条消息的价）", () => {
+  const ledger = makeLedger(10);
+  const billed = bj(2026, 9, 10, 20, 0); // 记账时刻：空闲
+  ledger.record({
+    sessionId: "sPricing",
+    messageId: "m1",
+    time: billed,
+    provider: "deepseek",
+    model: "deepseek-flash",
+    ...ledger.price("deepseek-flash", "deepseek", billed, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+  });
+  const now = bj(2026, 9, 11, 10, 0); // 查询时刻：次日高峰
+  const payload = detailPayload(ledger.detail("sPricing"), "sPricing", now, P1, CONFIG);
+  assert.equal(payload.cost, 1); // 已记金额按记账时刻的价格（空闲 ¥1）
+  assert.equal(payload.pricing.mode, "peak");
+  assert.deepEqual(payload.pricing.cny, { input: 2, cacheRead: 0.04, output: 8 });
+  assert.equal(payload.pricing.model, "deepseek-flash");
+  assert.equal(payload.pricing.billedAs, "deepseek-flash");
+  assert.equal(typeof payload.pricing.checkedAt, "string");
+  // 缓存命中率：全部为未命中输入 → 0%。
+  assert.equal(payload.cacheHitPercent, 0);
 });

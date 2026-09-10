@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-cost",
-  "version": "1.1.0",
-  "description": "Concise per-session token-cost line in the DSH web chat footer: official peak/off-peak pricing (weekday-aware) with model-name routing, RMB/USD by UI locale. Adds a second line under the default composer info bar.",
+  "version": "1.2.0",
+  "description": "Per-session token cost in the DSH web footer: a clickable chip appended to the right of the official stats row (official peak/off-peak pricing, weekday-aware, with model-name routing; RMB/USD by UI locale) that expands into a detail panel with unit prices, the next peak switch, and per-model usage.",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -42,13 +42,18 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1"
   },
   "scripts": {
     "test": "node --test",
     "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/client.js",
     "prepublishOnly": "npm run check && npm test"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
 }

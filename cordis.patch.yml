@@ -4,14 +4,15 @@
 # （或 `add github:<owner>/dsh-session-cost`、tarball）。本层在 profile 基础组合包
 # 之后应用；用户可在自己的 profile `cordis.patch.yml` 里按 id 覆盖本层任意行。
 #
-# 功能：在聊天界面底部默认信息栏（conversation.composer.dock）之下追加「本会话消耗」
-# 第二行——仅支持官方在售及兼容期内的模型（deepseek-flash / deepseek-v4-pro /
-# deepseek-v4-flash / deepseek-v4-flash-vision-exp），按每条
+# 功能：在聊天界面底部默认信息栏（官方 stats 行 `[data-composer-stats]`）的右端追加一枚
+# 可点击的「本会话消耗」角标——仅支持官方在售及兼容期内的模型（deepseek-flash /
+# deepseek-v4-pro / deepseek-v4-flash / deepseek-v4-flash-vision-exp），按每条
 # assistant 消息完成时刻取价（含 2026-08-17 起的峰谷定价：高峰为北京时间周一至周五
 # 09:00–12:00 / 14:00–18:00，其余时段含周末空闲半价；旧模型名按官方兼容路由
 # ——v4-flash 系列、2026-09-14 12:00 起的 v4-pro——以 V4.1 Flash 单价计费），
-# 人民币/美元随界面语言（或配置）切换。
-# 非上述模型的会话不显示第二行。价格数据维护在 lib/pricing-data.json，由插件作者随
+# 人民币/美元随界面语言（或配置）切换；点开角标展开详细菜单（当前单价、下一处峰谷切换、
+# 按模型 / 按时段的用量与费用；明细端点 /session-cost/session/<id>/detail）。
+# 非上述模型的会话不显示角标。价格数据维护在 lib/pricing-data.json，由插件作者随
 # 官方调价更新；普通用户无需、也不能覆盖价格。
 #
 # displayCurrency: auto=跟随界面语言（英文界面显示 USD）；CNY/USD=强制指定展示币种。

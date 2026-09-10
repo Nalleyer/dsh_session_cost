@@ -10,7 +10,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isPeak, priceAt, costOf, zeroTrimmed, addTrimmed } from "../lib/pricing.js";
+import {
+  isPeak,
+  priceAt,
+  costOf,
+  nextPeakTransition,
+  cacheHitPercent,
+  zeroTrimmed,
+  addTrimmed
+} from "../lib/pricing.js";
 
 // 价格数据来自数据文件（不写在代码里），此处直接读取以保持单一事实来源。
 const DATA = JSON.parse(
@@ -66,6 +74,51 @@ test("isPeak 按北京时间窗口判定（省略 weekdays 表示不限星期）
   assert.equal(isPeak(T_WEEKEND, timezone, peakWindows), true);
   assert.equal(isPeak(T_WEEKEND, timezone, peakWindows, peakWeekdays), false);
   assert.equal(isPeak(bj(2026, 9, 13, 15, 0), timezone, peakWindows, peakWeekdays), false); // 周日
+});
+
+test("nextPeakTransition：给出下一个整点切换（高峰 → 空闲）", () => {
+  const next = nextPeakTransition(T_PEAK, timezone, peakWindows, peakWeekdays);
+  assert.equal(next.at, bj(2026, 8, 17, 12, 0));
+  assert.equal(next.peak, false);
+  assert.equal(next.mode, "offPeak");
+});
+
+test("nextPeakTransition：午休结束后回到高峰（空闲 → 高峰）", () => {
+  const next = nextPeakTransition(bj(2026, 8, 17, 12, 30), timezone, peakWindows, peakWeekdays);
+  assert.equal(next.at, bj(2026, 8, 17, 14, 0));
+  assert.equal(next.mode, "peak");
+});
+
+test("nextPeakTransition：跨夜与跨周末的切换（周一 09:00 / 下周一 09:00）", () => {
+  const overNight = nextPeakTransition(T_OFF, timezone, peakWindows, peakWeekdays);
+  assert.equal(overNight.at, bj(2026, 8, 18, 9, 0)); // 周二 09:00
+  assert.equal(overNight.mode, "peak");
+
+  // 周五 18:00 之后：周末全天空闲，直到下周一 09:00。
+  const overWeekend = nextPeakTransition(bj(2026, 8, 21, 18, 0), timezone, peakWindows, peakWeekdays);
+  assert.equal(overWeekend.at, bj(2026, 8, 24, 9, 0));
+  assert.equal(overWeekend.mode, "peak");
+});
+
+test("nextPeakTransition：整点边界（窗口起点即为当前状态时不误报切换）", () => {
+  const atStart = nextPeakTransition(bj(2026, 8, 17, 9, 0), timezone, peakWindows, peakWeekdays);
+  assert.equal(atStart.at, bj(2026, 8, 17, 12, 0));
+  assert.equal(atStart.mode, "offPeak");
+});
+
+test("nextPeakTransition：不限星期时仅按窗口切换", () => {
+  const next = nextPeakTransition(bj(2026, 8, 22, 10, 0), timezone, peakWindows); // 周六 10:00（不限星期=高峰）
+  assert.equal(next.at, bj(2026, 8, 22, 12, 0));
+  assert.equal(next.mode, "offPeak");
+});
+
+test("cacheHitPercent：命中率按提示侧输入计算，无可计费输入时为 null", () => {
+  assert.equal(cacheHitPercent(1_000, 9_000), 90);
+  assert.equal(cacheHitPercent(0, 1_000), 100);
+  assert.equal(cacheHitPercent(1_000, 0), 0);
+  assert.equal(cacheHitPercent(0, 0), null);
+  assert.equal(cacheHitPercent(Number.NaN, -5), null);
+  assert.equal(cacheHitPercent(2_000, 1_000), 33.3);
 });
 
 test("priceAt：峰谷之前的时段为平价（flat）", () => {
