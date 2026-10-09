@@ -54,12 +54,12 @@ dsh plugin --profile web add https://github.com/Nalleyer/dsh_session_cost
 | 总费用 | 最多显示六位小数 |
 | 计价 | 当前高峰／空闲状态，输入、缓存读取和输出的单价，单位为每百万 tokens |
 | 模型 | 最近计费的模型；发生兼容路由时显示「请求名 → 实际计费名」 |
-| 时段 | 下一次峰谷切换时间，以及高峰、空闲和平价记录各自的费用 |
+| 时段 | 下次单价变化时间，以及高峰、空闲和平价记录各自的费用 |
 | 用量 | 未命中缓存的输入、缓存读取、输出 tokens，缓存命中率和请求数 |
 | 时间 | 保留明细中的首次和最近计费时间 |
 | 按模型 | 会话使用过多个模型时，列出各模型的费用 |
 
-角标上的「高峰／空闲」表示最近一条计费消息所处的时段。明细里的单价则按最近计费的模型在当前时刻查询，两者可能不同。时段切换不会改变已经记录的费用。
+角标上的「高峰／空闲」表示最近一条计费消息所处的时段。明细里的单价则按最近计费的模型在当前时刻查询，两者可能不同。当前单价变化不会改变已经记录的费用。
 
 默认情况下，英文界面显示美元，其他语言显示人民币；也可以通过 `displayCurrency` 固定币种。两种金额分别按官方价格表计算，不通过汇率换算。
 
@@ -71,10 +71,12 @@ dsh plugin --profile web add https://github.com/Nalleyer/dsh_session_cost
 
 当前价格表采用北京时间（`Asia/Shanghai`）：
 
-- 周一至周五的 `09:00–12:00` 和 `14:00–18:00` 为高峰时段。
-- 其余时段为空闲时段，包括周末全天；空闲单价为高峰的一半。
+- 周一至周五（不含节假日）的 `09:00–12:00` 和 `14:00–18:00` 为高峰时段。
+- 其余时段为空闲时段，包括周末和节假日全天；空闲单价为高峰的一半。周末补班仍按空闲价计算。
 
-**插件尚未单独处理中国法定节假日。** [官方价格说明](https://api-docs.deepseek.com/quick_start/pricing/)将这些节假日全天列为空闲时段，因此节假日落在周一至周五的高峰窗口时，插件估算可能偏高。
+节假日按国务院公布的完整放假区间处理，包含调休日。当前内置 [2026 年放假安排](https://www.gov.cn/zhengce/content/202511/content_7047090.htm)，与 [官方定价说明](https://api-docs.deepseek.com/quick_start/pricing/)中的周末及节假日空闲规则配合使用。
+
+日历随插件版本维护。未收录的年份继续按星期和每日时段估算，角标和明细会显示“节假日数据缺失”的提示；这些年份的节假日费用可能偏高。计算下次单价变化时间时会跳过已收录的假期，能跨越春节等长假。
 
 价格表随插件发布，由作者维护在 [lib/pricing-data.json](lib/pricing-data.json)，不会自动从官网获取更新。官方调价后，需要更新插件。用户配置不提供价格覆盖选项。
 
@@ -92,7 +94,7 @@ $DSH_HOME/storages/session-cost.json
 
 每个会话默认保留 2000 条逐条明细。超出后，早期记录只保留汇总金额和用量，仍计入总额，但不再参与按模型、按时段拆分；明细中的时间范围也只涵盖保留的记录。
 
-价格规则更新后，插件会在启动时按各条明细的原始时间重新计价。已归档的汇总保留原金额，无法逐条重算。升级到 `1.2.1` 后，保留明细中此前误按 Flash 计价的 Pro 记录会改按 Pro 单价计算，已归档的部分无法修正。
+价格或节假日规则更新后，插件会在启动时按各条明细的原始时间重新计价。已归档的汇总保留原金额，无法逐条重算。已归档金额若曾缺少节假日数据，对应年份的提示会保留；日历补齐后显示“节假日未校准”，说明这部分仍是原估算金额。升级到 `1.2.1` 后，保留明细中此前误按 Flash 计价的 Pro 记录会改按 Pro 单价计算，已归档的部分无法修正。
 
 ## 配置
 
@@ -159,7 +161,7 @@ npm test
 
 | 文件 | 职责 |
 | --- | --- |
-| [lib/pricing-data.json](lib/pricing-data.json) | 模型、历史价格、峰谷窗口、兼容路由和来源日期 |
+| [lib/pricing-data.json](lib/pricing-data.json) | 模型、历史价格、峰谷窗口、年度节假日、兼容路由和来源日期 |
 | [lib/pricing.js](lib/pricing.js) | 计价函数 |
 | [lib/index.js](lib/index.js) | host 记账、持久化和查询端点 |
 | [lib/client.js](lib/client.js) | 费用角标和明细面板 |
@@ -173,7 +175,7 @@ host 提供两个 GET 端点，默认仅允许回环访问：
 /session-cost/session/<id>/detail
 ```
 
-概览返回 `cost`（人民币）、`costUsd`（美元）、token 用量、`calls`、`lastMode`、`supported` 和显示配置。明细另含 `cacheHitPercent`、`firstTime`、`lastTime`、`models[]`、`modes`、`pricing`、`nextSwitch` 和 `trimmed`。
+概览返回 `cost`（人民币）、`costUsd`（美元）、token 用量、`calls`、`lastMode`、`supported`、`missingHolidayYears`（尚未应用节假日规则的年份）、`holidayCalendarYears`（已收录的年份）和显示配置。明细另含 `cacheHitPercent`、`firstTime`、`lastTime`、`models[]`、`modes`、`pricing`、`nextSwitch` 和 `trimmed`。
 
 `supported: false` 时客户端隐藏角标。未知会话返回零汇总，明细的 `pricing` 为 `null`。价格表更新后，插件会重新判断已记录的不支持模型名是否已获支持；旧账本缺少模型名且仍有计费记录时，会保留隐藏状态。
 

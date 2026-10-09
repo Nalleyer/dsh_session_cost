@@ -12,6 +12,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   isPeak,
+  validateHolidays,
+  holidayCalendarStatus,
   priceAt,
   costOf,
   nextPeakTransition,
@@ -24,8 +26,8 @@ import {
 const DATA = JSON.parse(
   readFileSync(fileURLToPath(new URL("../lib/pricing-data.json", import.meta.url)), "utf8")
 );
-const { timezone, peakWindows, peakWeekdays, policies, models } = DATA;
-const opts = { timezone, peakWindows, peakWeekdays, policies };
+const { timezone, peakWindows, peakWeekdays, holidays, policies, models } = DATA;
+const opts = { timezone, peakWindows, peakWeekdays, holidays, policies };
 
 /** 构造北京时间（UTC+8）的 epoch ms。 */
 const bj = (y, mo, d, h, mi = 0) => Date.UTC(y, mo - 1, d, h - 8, mi);
@@ -76,7 +78,7 @@ test("isPeak 按北京时间窗口判定（省略 weekdays 表示不限星期）
   assert.equal(isPeak(bj(2026, 9, 13, 15, 0), timezone, peakWindows, peakWeekdays), false); // 周日
 });
 
-test("nextPeakTransition：给出下一个整点切换（高峰 → 空闲）", () => {
+test("nextPeakTransition：给出下一个整点的单价变化（高峰 → 空闲）", () => {
   const next = nextPeakTransition(T_PEAK, timezone, peakWindows, peakWeekdays);
   assert.equal(next.at, bj(2026, 8, 17, 12, 0));
   assert.equal(next.peak, false);
@@ -89,7 +91,7 @@ test("nextPeakTransition：午休结束后回到高峰（空闲 → 高峰）", 
   assert.equal(next.mode, "peak");
 });
 
-test("nextPeakTransition：跨夜与跨周末的切换（周一 09:00 / 下周一 09:00）", () => {
+test("nextPeakTransition：跨夜与跨周末的单价变化（周一 09:00 / 下周一 09:00）", () => {
   const overNight = nextPeakTransition(T_OFF, timezone, peakWindows, peakWeekdays);
   assert.equal(overNight.at, bj(2026, 8, 18, 9, 0)); // 周二 09:00
   assert.equal(overNight.mode, "peak");
@@ -100,13 +102,13 @@ test("nextPeakTransition：跨夜与跨周末的切换（周一 09:00 / 下周�
   assert.equal(overWeekend.mode, "peak");
 });
 
-test("nextPeakTransition：整点边界（窗口起点即为当前状态时不误报切换）", () => {
+test("nextPeakTransition：整点边界（窗口起点即为当前状态时不误报单价变化）", () => {
   const atStart = nextPeakTransition(bj(2026, 8, 17, 9, 0), timezone, peakWindows, peakWeekdays);
   assert.equal(atStart.at, bj(2026, 8, 17, 12, 0));
   assert.equal(atStart.mode, "offPeak");
 });
 
-test("nextPeakTransition：不限星期时仅按窗口切换", () => {
+test("nextPeakTransition：不限星期时仅按窗口判断单价变化", () => {
   const next = nextPeakTransition(bj(2026, 8, 22, 10, 0), timezone, peakWindows); // 周六 10:00（不限星期=高峰）
   assert.equal(next.at, bj(2026, 8, 22, 12, 0));
   assert.equal(next.mode, "offPeak");
@@ -257,4 +259,75 @@ test("zeroTrimmed / addTrimmed：裁剪聚合按实际数值并入", () => {
   assert.equal(t.calls, 4);
   assert.equal(t.cost, 3.5);
   assert.equal(t.costUsd, 0.5);
+});
+
+test("内置日历覆盖国务院 2026 年全部放假区间，格式错误直接报错", () => {
+  assert.doesNotThrow(() => validateHolidays(holidays));
+  const expected = [];
+  for (const [month, start, end] of [[1, 1, 3], [2, 15, 23], [4, 4, 6], [5, 1, 5], [6, 19, 21], [9, 25, 27], [10, 1, 7]]) {
+    for (let day = start; day <= end; day++) {
+      expected.push("2026-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0"));
+    }
+  }
+  assert.deepEqual(holidays["2026"], expected);
+  for (const invalid of [void 0, {}, { 2026: [] }, { 2026: ["2026-02-30"] },
+    { 2026: ["2027-01-01"] }, { 2026: ["2026-01-01", "2026-01-01"] }]) {
+    assert.throws(() => validateHolidays(invalid), TypeError);
+  }
+});
+
+test("节假日全天空闲，日期按北京时间判断；普通工作日仍保留窗口边界", () => {
+  for (const date of holidays["2026"]) {
+    const [year, month, day] = date.split("-").map(Number);
+    for (const hour of [0, 9, 11, 14, 17, 23]) {
+      assert.equal(isPeak(bj(year, month, day, hour), timezone, peakWindows, peakWeekdays, holidays), false, date);
+    }
+  }
+  // UTC 仍为 9 月 24 日，但北京时间已到中秋假期 9 月 25 日。
+  assert.equal(isPeak(Date.UTC(2026, 8, 24, 16), timezone, [[0, 24]], peakWeekdays, holidays), false);
+  for (const [hour, expected] of [[8, false], [9, true], [12, false], [14, true], [18, false]]) {
+    assert.equal(isPeak(bj(2026, 10, 8, hour), timezone, peakWindows, peakWeekdays, holidays), expected);
+  }
+});
+
+test("周末补班仍为空闲，不改用工作日高峰", () => {
+  for (const [month, day] of [[1, 4], [2, 14], [2, 28], [5, 9], [9, 20], [10, 10]]) {
+    assert.equal(isPeak(bj(2026, month, day, 10), timezone, peakWindows, peakWeekdays, holidays), false);
+  }
+});
+
+test("nextPeakTransition 能跨越春节长假，并跳过中秋和国庆假期", () => {
+  for (const [from, expected] of [
+    [bj(2026, 2, 13, 18), bj(2026, 2, 24, 9)],
+    [bj(2026, 9, 24, 18), bj(2026, 9, 28, 9)],
+    [bj(2026, 9, 30, 18), bj(2026, 10, 8, 9)]
+  ]) {
+    const next = nextPeakTransition(from, timezone, peakWindows, peakWeekdays, holidays);
+    assert.equal(next.at, expected);
+    assert.equal(next.mode, "peak");
+  }
+});
+
+test("假期价格同时适用于 Flash、Pro 和旧名路由，平价历史保持原价", () => {
+  const time = bj(2026, 10, 1, 10);
+  for (const model of models) {
+    const unit = priceAt(model, time, opts);
+    assert.equal(unit.mode, "offPeak");
+    assert.equal(unit.cny.input, model === "deepseek-v4-pro" ? 4.5 : 1);
+    assert.equal(unit.usd.input, model === "deepseek-v4-pro" ? 0.66 : 0.15);
+    assert.equal(unit.holidayCalendarMissing, false);
+  }
+  const flat = priceAt("deepseek-v4-pro", bj(2026, 6, 19, 10), opts);
+  assert.equal(flat.mode, "flat");
+  assert.equal(flat.cny.input, 3);
+});
+
+test("未收录年份继续按星期估算，并明确标记缺少日历", () => {
+  const time = bj(2027, 1, 4, 10);
+  assert.deepEqual(holidayCalendarStatus(time, timezone, holidays), { year: "2027", available: false });
+  const unit = priceAt("deepseek-flash", time, opts);
+  assert.equal(unit.mode, "peak");
+  assert.equal(unit.cny.input, 2);
+  assert.equal(unit.holidayYear, "2027");
+  assert.equal(unit.holidayCalendarMissing, true);
 });

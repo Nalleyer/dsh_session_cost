@@ -18,22 +18,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SessionCostLedger, detailPayload, recordSessionEvent } from "../lib/index.js";
-import { nextPeakTransition, priceAt, zeroCounts, zeroTrimmed } from "../lib/pricing.js";
+import { holidayCalendarStatus, nextPeakTransition, priceAt, zeroCounts, zeroTrimmed } from "../lib/pricing.js";
 
 // 价格数据来自数据文件（不写在代码里），此处直接读取以保持单一事实来源。
 const DATA = JSON.parse(
   readFileSync(fileURLToPath(new URL("../lib/pricing-data.json", import.meta.url)), "utf8")
 );
-const { timezone, peakWindows, peakWeekdays, policies } = DATA;
+const { timezone, peakWindows, peakWeekdays, holidays, policies } = DATA;
 
 /** 构造北京时间（UTC+8）的 epoch ms。 */
 const bj = (y, mo, d, h, mi = 0) => Date.UTC(y, mo - 1, d, h - 8, mi);
 
-function makePricing(hash) {
+function makePricing(hash, calendar = holidays) {
   return {
     hash,
-    at: (model, time) => priceAt(model, time, { timezone, peakWindows, peakWeekdays, policies }),
-    next: (time) => nextPeakTransition(time, timezone, peakWindows, peakWeekdays)
+    holidayYears: Object.keys(calendar).sort(),
+    at: (model, time) => priceAt(model, time, { timezone, peakWindows, peakWeekdays, holidays: calendar, policies }),
+    next: (time) => nextPeakTransition(time, timezone, peakWindows, peakWeekdays, calendar),
+    calendar: (time) => holidayCalendarStatus(time, timezone, calendar)
   };
 }
 
@@ -233,7 +235,7 @@ test("价格更新会把保留明细中错按 Flash 的 Pro 费用重算为 Pro"
   const oldPricing = {
     hash: "cancelled-pro-retirement",
     at: (model, at) => priceAt(model, at, {
-      timezone, peakWindows, peakWeekdays,
+      timezone, peakWindows, peakWeekdays, holidays,
       policies: [...policies, {
         since: "2026-09-14T12:00:00+08:00",
         routes: { "deepseek-v4-pro": "deepseek-flash" }
@@ -355,7 +357,7 @@ test("detailPayload：空会话给零聚合，不臆造单价", () => {
   assert.equal(payload.cacheHitPercent, null);
   assert.equal(payload.displayCurrency, "auto");
   assert.equal(payload.symbol, "¥");
-  // 10:00 高峰 → 下一处切换为 12:00 转空闲。
+  // 10:00 高峰 → 下次单价变化为 12:00 起按空闲价计算。
   assert.equal(payload.nextSwitch.at, bj(2026, 9, 10, 12, 0));
   assert.equal(payload.nextSwitch.mode, "offPeak");
 });
@@ -381,4 +383,65 @@ test("detailPayload：单价按最近模型的当前时刻取（即下一条消�
   assert.equal(typeof payload.pricing.checkedAt, "string");
   // 缓存命中率：全部为未命中输入 → 0%。
   assert.equal(payload.cacheHitPercent, 0);
+});
+
+test("加入节假日规则后重算保留明细，已归档金额保持原值", () => {
+  const ledger = makeLedger(1);
+  const oldPricing = makePricing("without-holidays", {});
+  for (const [messageId, day] of [["m1", 1], ["m2", 2]]) {
+    const time = bj(2026, 10, day, 10);
+    ledger.record({
+      sessionId: "sHolidayReprice", messageId, time, provider: "deepseek", model: "deepseek-flash",
+      ...ledger.price("deepseek-flash", "deepseek", time,
+        { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, oldPricing)
+    });
+  }
+  ledger.pricingHash = oldPricing.hash;
+  assert.equal(ledger.sessionView("sHolidayReprice").cost, 4);
+  ledger.reprice(P1);
+  const view = ledger.sessionView("sHolidayReprice");
+  assert.equal(view.cost, 3); // 已归档 ¥2 + 保留明细重算 ¥1。
+  assert.equal(view.calls, 2);
+  assert.equal(view.lastMode, "offPeak");
+  assert.equal(ledger.detail("sHolidayReprice").modes.offPeak.cost, 1);
+  assert.deepEqual(view.missingHolidayYears, ["2026"]); // 归档部分仍未修正。
+});
+
+test("日历缺失提示持久化；新增年份只清除已重算明细的提示", async () => {
+  const ledger = makeLedger(1);
+  for (const [messageId, day] of [["m1", 4], ["m2", 5]]) {
+    const time = bj(2027, 1, day, 10);
+    ledger.record({
+      sessionId: "sCalendarMissing", messageId, time, provider: "deepseek", model: "deepseek-flash",
+      ...ledger.price("deepseek-flash", "deepseek", time,
+        { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+    });
+  }
+  ledger.pricingHash = P1.hash;
+  await ledger.flush();
+  const restored = new SessionCostLedger(ledger.path, 1);
+  restored.load();
+  assert.deepEqual(restored.sessionView("sCalendarMissing").missingHolidayYears, ["2027"]);
+  // 模拟日历更新，不代表真实 2027 年放假安排。
+  const updated = makePricing("calendar-added", { ...holidays, 2027: ["2027-01-04", "2027-01-05"] });
+  restored.reprice(updated);
+  await restored.flush();
+  assert.equal(restored.sessionView("sCalendarMissing").cost, 3);
+  assert.deepEqual(restored.sessionView("sCalendarMissing").missingHolidayYears, ["2027"]);
+  assert.equal(restored.bySession.get("sCalendarMissing").messages.get("m2").holidayCalendarMissing, false);
+  assert.deepEqual(restored.bySession.get("sCalendarMissing").trimmed.missingHolidayYears, ["2027"]);
+});
+
+test("保留的全部明细修正后，日历缺失提示清除", () => {
+  const ledger = makeLedger(10);
+  const time = bj(2027, 1, 4, 10);
+  ledger.record({
+    sessionId: "sCalendarUpdated", messageId: "m1", time, provider: "deepseek", model: "deepseek-flash",
+    ...ledger.price("deepseek-flash", "deepseek", time,
+      { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+  });
+  ledger.pricingHash = P1.hash;
+  ledger.reprice(makePricing("calendar-added", { ...holidays, 2027: ["2027-01-04"] }));
+  assert.equal(ledger.sessionView("sCalendarUpdated").cost, 1);
+  assert.deepEqual(ledger.sessionView("sCalendarUpdated").missingHolidayYears, []);
 });

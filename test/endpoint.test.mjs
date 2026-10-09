@@ -3,7 +3,7 @@
  *
  * 用假的 cordis 上下文把插件 apply 起来：`session/event` 事件照常投喂账本，
  * `webServer.register` 捕获路由处理函数，然后用假的 req/res 发真实请求。
- * 覆盖：概览端点、明细端点（聚合 + 当前单价 + 下一处峰谷切换）、未知会话回零、
+ * 覆盖：概览端点、明细端点（聚合 + 当前单价 + 下次单价变化）、未知会话回零、
  * 非 GET 方法、回环限制、未知路径 404、畸形百分号编码 400。
  *
  * 运行：node --test
@@ -22,7 +22,7 @@ import { priceAt } from "../lib/pricing.js";
 const DATA = JSON.parse(
   readFileSync(fileURLToPath(new URL("../lib/pricing-data.json", import.meta.url)), "utf8")
 );
-const { timezone, peakWindows, peakWeekdays, policies } = DATA;
+const { timezone, peakWindows, peakWeekdays, holidays, policies } = DATA;
 
 const cleanups = [];
 after(async () => {
@@ -129,7 +129,7 @@ test("概览端点：总量 / 角标模式 / 展示币种", async () => {
   assert.equal(body.headers ?? body.symbolUsd, "$");
 });
 
-test("明细端点：按模型/时段聚合 + 当前单价 + 下一处峰谷切换", async () => {
+test("明细端点：按模型/时段聚合 + 当前单价 + 下次单价变化", async () => {
   const plugin = boot();
   // 两条消息：一条 deepseek-flash（高峰）、一条 v4-pro（空闲，保持 Pro 单价）。
   plugin.message("s2", 1, bj(2026, 9, 10, 15, 0), "deepseek-flash", {
@@ -164,7 +164,7 @@ test("明细端点：按模型/时段聚合 + 当前单价 + 下一处峰谷切�
   assert.equal(pro.outputTokens, 1_000_000);
   // 单价按「最近模型的当前时刻」给出（下一条消息的价）：这里与 priceAt(now) 对齐，
   // 不依赖测试运行时刻落在哪一条政策区间。
-  const expected = priceAt(body.lastModel, body.serverTime, { timezone, peakWindows, peakWeekdays, policies });
+  const expected = priceAt(body.lastModel, body.serverTime, { timezone, peakWindows, peakWeekdays, holidays, policies });
   assert.equal(body.pricing.model, "deepseek-v4-pro");
   assert.equal(body.pricing.billedAs, expected.billedAs);
   assert.equal(body.pricing.mode, expected.mode);
@@ -233,4 +233,43 @@ test("showCurrency 强制 USD 时两个端点都带同一配置", async () => {
     assert.equal(body.symbol, "￥");
     assert.equal(body.symbolUsd, "US$");
   }
+});
+
+test("host 接入节假日日历：概览、当前单价与下次单价变化保持一致", async (t) => {
+  t.mock.method(Date, "now", () => bj(2026, 10, 1, 10));
+  const plugin = boot();
+  plugin.message("holiday", 1, bj(2026, 10, 1, 10), "deepseek-flash", {
+    inputTokens: 1_000_000, outputTokens: 0
+  });
+  const overview = (await plugin.request("/session-cost/session/holiday")).body;
+  const detail = (await plugin.request("/session-cost/session/holiday/detail")).body;
+  assert.equal(overview.cost, 1);
+  assert.equal(overview.lastMode, "offPeak");
+  assert.deepEqual(overview.missingHolidayYears, []);
+  assert.equal(detail.pricing.mode, "offPeak");
+  assert.equal(detail.pricing.cny.input, 1);
+  assert.equal(detail.nextSwitch.at, bj(2026, 10, 8, 9));
+  assert.equal(detail.modes.offPeak.calls, 1);
+});
+
+test("未收录年份两个端点均返回缺失提示，同时保留星期估算的金额", async (t) => {
+  t.mock.method(Date, "now", () => bj(2027, 1, 4, 10));
+  const plugin = boot();
+  plugin.message("future", 1, bj(2027, 1, 4, 10), "deepseek-flash", {
+    inputTokens: 1_000_000, outputTokens: 0
+  });
+  for (const suffix of ["", "/detail"]) {
+    const { body } = await plugin.request("/session-cost/session/future" + suffix);
+    assert.equal(body.supported, true);
+    assert.equal(body.cost, 2);
+    assert.deepEqual(body.missingHolidayYears, ["2027"]);
+  }
+});
+
+test("跨年预测进入未收录日历时，明细提前提示新年份缺失", async (t) => {
+  t.mock.method(Date, "now", () => bj(2026, 12, 31, 18));
+  const plugin = boot();
+  const { body } = await plugin.request("/session-cost/session/year-end/detail");
+  assert.equal(body.nextSwitch.at, bj(2027, 1, 1, 9));
+  assert.deepEqual(body.missingHolidayYears, ["2027"]);
 });

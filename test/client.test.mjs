@@ -5,7 +5,7 @@
  * 造一个 `window.__ModuleLoader__` 门面接住工厂，用 jsdom 提供 DOM，再用真实
  * react / react-dom 渲染组件。覆盖：
  * 1. 角标被门户进官方信息栏那一行（`[data-composer-stats]`）的右端，而不是自己占一行；
- * 2. 点开角标 → 明细菜单（当前单价、下一处峰谷切换、用量、模型路由）；
+ * 2. 点开角标 → 明细菜单（当前单价、下次单价变化、用量、模型路由）；
  * 3. 外部点击 / Esc 关闭菜单；
  * 4. 官方信息栏不存在时退回自己的 dock 行；
  * 5. 没有已计费用量、或会话含未支持模型时不占位；
@@ -323,7 +323,7 @@ test("角标追加在官方信息栏那一行（不是自己新起一行）", { 
   assert.ok(loaded.requests.includes("/session-cost/session/s1"));
 });
 
-test("点开角标 → 明细菜单（单价 / 下次切换 / 用量 / 模型路由）", { skip: SKIP }, async () => {
+test("点开角标 → 明细菜单（单价 / 下次单价变化 / 用量 / 模型路由）", { skip: SKIP }, async () => {
   const loaded = loadBundle();
   const { dock } = await layout();
   await mount(loaded, dock);
@@ -351,7 +351,8 @@ test("点开角标 → 明细菜单（单价 / 下次切换 / 用量 / 模型路
   assert.match(text, /12,000/); // 输入 tokens 千分位
   assert.match(text, /228,000/); // 缓存读取
   assert.match(text, /4,500/); // 输出 tokens
-  assert.match(text, /下次切换/);
+  assert.match(text, /下次单价变化/);
+  assert.match(text, /起按空闲价计算/);
   assert.match(text, /价格核对 2026-09-10/);
   assert.match(text, /按模型/); // 两个模型 → 拆分清单
   assert.ok(loaded.requests.includes("/session-cost/session/s1/detail"));
@@ -466,7 +467,8 @@ test("英文界面：美元金额 + 英文文案（内置字典兜底）", { ski
   assert.match(panel.textContent, /Session cost/);
   assert.match(panel.textContent, /Price \/ 1M tokens/);
   assert.match(panel.textContent, /\$0\.3 \/ \$0\.006 \/ \$1\.2/);
-  assert.match(panel.textContent, /Off-peak at/);
+  assert.match(panel.textContent, /Next unit price change/);
+  assert.match(panel.textContent, /Off-peak rate begins/);
   assert.match(panel.textContent, /Prices checked 2026-09-10/);
 });
 
@@ -513,4 +515,49 @@ test("react-dom 不可用时降级为内联渲染（不抛错）", { skip: SKIP 
   const chip = query("[data-session-cost]");
   assert.ok(chip !== null, "chip must still render without react-dom");
   assert.equal(chip.parentElement.className, "sc_row");
+});
+
+for (const locale of ["zh", "en"]) {
+  test("缺失日历的角标与明细提示：" + locale, { skip: SKIP }, async () => {
+    const loaded = loadBundle({
+      locale,
+      payloads: {
+        "/session-cost/session/s1": sessionPayload({ missingHolidayYears: ["2027"] }),
+        "/session-cost/session/s1/detail": detailPayload({ missingHolidayYears: ["2027"] })
+      }
+    });
+    const { dock } = await layout();
+    await mount(loaded, dock);
+    const chip = query("[data-session-cost]");
+    assert.match(chip.textContent, locale === "zh" ? /节假日数据缺失/ : /Holiday dates missing/);
+    assert.match(chip.getAttribute("aria-label"), /2027/);
+    assert.match(chip.title, locale === "zh" ? /按星期估算/ : /weekday estimates/);
+    await act(async () => chip.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const warning = query("[data-session-cost-panel] [data-session-cost-calendar-warning]");
+    assert.ok(warning !== null);
+    assert.match(warning.textContent, /2027/);
+    assert.match(warning.textContent, locale === "zh" ? /按星期估算/ : /weekday estimates/);
+  });
+}
+
+test("日历已补齐时，归档提示说明金额未校准，不误报数据缺失", { skip: SKIP }, async () => {
+  const warningState = { missingHolidayYears: ["2026"], holidayCalendarYears: ["2026"] };
+  const loaded = loadBundle({
+    payloads: {
+      "/session-cost/session/s1": sessionPayload(warningState),
+      "/session-cost/session/s1/detail": detailPayload(warningState)
+    }
+  });
+  const { dock } = await layout();
+  await mount(loaded, dock);
+  const chip = query("[data-session-cost]");
+  assert.match(chip.textContent, /节假日未校准/);
+  assert.doesNotMatch(chip.textContent, /数据缺失/);
+  await act(async () => chip.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const warning = query("[data-session-cost-panel] [data-session-cost-calendar-warning]");
+  assert.match(warning.textContent, /2026/);
+  assert.match(warning.textContent, /已归档费用未按节假日校准/);
+  assert.doesNotMatch(warning.textContent, /缺少/);
 });

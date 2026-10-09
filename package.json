@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-cost",
-  "version": "1.2.1",
-  "description": "Per-session token cost in the DSH Desktop/Web footer: a clickable chip appended to the right of the official stats row (official peak/off-peak pricing, weekday-aware, with model-name routing; RMB/USD by UI locale) that expands into a detail panel with unit prices, the next peak switch, and per-model usage.",
+  "version": "1.2.2",
+  "description": "Per-session token cost in the DSH Desktop/Web footer: a clickable chip appended to the right of the official stats row (official peak/off-peak pricing, weekday/Chinese-public-holiday-aware, with model-name routing; RMB/USD by UI locale) that expands into a detail panel with unit prices, the next unit price change, and per-model usage.",
   "keywords": [
     "dsh",
     "deepseek-harness",
