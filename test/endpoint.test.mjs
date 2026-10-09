@@ -111,7 +111,7 @@ function boot(options = {}) {
 
 test("概览端点：总量 / 角标模式 / 展示币种", async () => {
   const plugin = boot();
-  plugin.message("s1", 1, bj(2026, 9, 10, 10, 0), "deepseek-flash", {
+  plugin.message("s1", 1, bj(2026, 9, 10, 15, 0), "deepseek-flash", {
     inputTokens: 1_000_000,
     cacheReadTokens: 0,
     outputTokens: 0
@@ -131,8 +131,8 @@ test("概览端点：总量 / 角标模式 / 展示币种", async () => {
 
 test("明细端点：按模型/时段聚合 + 当前单价 + 下一处峰谷切换", async () => {
   const plugin = boot();
-  // 两条消息：一条 deepseek-flash（高峰）、一条 v4-pro（空闲，且已进入兼容路由）。
-  plugin.message("s2", 1, bj(2026, 9, 10, 10, 0), "deepseek-flash", {
+  // 两条消息：一条 deepseek-flash（高峰）、一条 v4-pro（空闲，保持 Pro 单价）。
+  plugin.message("s2", 1, bj(2026, 9, 10, 15, 0), "deepseek-flash", {
     inputTokens: 1_000_000,
     cacheReadTokens: 1_000_000,
     outputTokens: 0
@@ -151,15 +151,17 @@ test("明细端点：按模型/时段聚合 + 当前单价 + 下一处峰谷切�
   assert.equal(body.cacheReadTokens, 1_000_000);
   assert.equal(body.outputTokens, 1_000_000);
   assert.equal(body.cacheHitPercent, 50);
-  assert.equal(body.firstTime, bj(2026, 9, 10, 10, 0));
+  assert.equal(body.firstTime, bj(2026, 9, 10, 15, 0));
   assert.equal(body.lastTime, bj(2026, 9, 14, 20, 0));
   assert.equal(body.lastMode, "offPeak");
   assert.equal(body.modes.peak.calls, 1);
   assert.equal(body.modes.offPeak.calls, 1);
   assert.equal(body.models.length, 2);
-  const routed = body.models.find((entry) => entry.model === "deepseek-v4-pro");
-  assert.equal(routed.billedAs, "deepseek-flash"); // 2026-09-14 12:00 起全量路由
-  assert.equal(routed.outputTokens, 1_000_000);
+  const pro = body.models.find((entry) => entry.model === "deepseek-v4-pro");
+  assert.equal(pro.billedAs, "deepseek-v4-pro");
+  assert.equal(pro.cost, 13.5);
+  assert.equal(pro.costUsd, 1.98);
+  assert.equal(pro.outputTokens, 1_000_000);
   // 单价按「最近模型的当前时刻」给出（下一条消息的价）：这里与 priceAt(now) 对齐，
   // 不依赖测试运行时刻落在哪一条政策区间。
   const expected = priceAt(body.lastModel, body.serverTime, { timezone, peakWindows, peakWeekdays, policies });
@@ -198,7 +200,7 @@ test("概览端点：未知会话回零", async () => {
 
 test("明细端点：含未支持模型的会话仍照实返回明细（supported=false 由客户端隐藏）", async () => {
   const plugin = boot();
-  plugin.message("s3", 1, bj(2026, 9, 10, 10, 0), "claude-opus-4", { inputTokens: 10, outputTokens: 10 });
+  plugin.message("s3", 1, bj(2026, 9, 10, 15, 0), "claude-opus-4", { inputTokens: 10, outputTokens: 10 });
   const { body } = await plugin.request("/session-cost/session/s3/detail");
   assert.equal(body.ok, true);
   assert.equal(body.supported, false);
@@ -223,7 +225,7 @@ test("loopbackOnly=false 时允许非回环访问（配置项生效）", async (
 
 test("showCurrency 强制 USD 时两个端点都带同一配置", async () => {
   const plugin = boot({ displayCurrency: "USD", symbol: "￥", symbolUsd: "US$" });
-  plugin.message("s4", 1, bj(2026, 9, 10, 10, 0), "deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 });
+  plugin.message("s4", 1, bj(2026, 9, 10, 15, 0), "deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 });
   const overview = await plugin.request("/session-cost/session/s4");
   const detail = await plugin.request("/session-cost/session/s4/detail");
   for (const body of [overview.body, detail.body]) {

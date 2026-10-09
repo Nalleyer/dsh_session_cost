@@ -7,7 +7,7 @@
  * 3. reprice 保留 unsupported 会话（supported=false 不被重置）；
  * 4. 写盘期间到达的新记录会在同一轮 flush 中落盘；
  * 5. 模型表更新后 unsupported 标记的自愈与保守规则（见 lib/index.js: stillUnsupported）；
- * 6. 模型名路由（v4-pro → deepseek-flash）在记账侧的落地。
+ * 6. 旧 Flash 模型名路由与 Pro 独立定价在记账侧的落地。
  * 运行：node --test
  */
 import { test, after } from "node:test";
@@ -172,7 +172,7 @@ test("deepseek-flash（V4.1）属支持模型：正常记账，不再隐藏角�
   recordSessionEvent(ledger, new Map(), { id: "sNew" }, {
     type: "assistant/message",
     seq: 1,
-    time: bj(2026, 9, 10, 10, 0), // 周四 10:00 高峰
+    time: bj(2026, 9, 10, 15, 0), // 周四 15:00 高峰
     data: {
       message: { id: "m1", source: { kind: "model", provider: "deepseek", model: "deepseek-flash" } },
       usage: { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }
@@ -212,7 +212,7 @@ test("unsupported 迁移：旧账本未记模型名时，无明细会话清除�
   assert.equal(ledger.sessionView("sLegacyUsed").supported, false);
 });
 
-test("模型名路由：v4-pro 于 2026-09-14 12:00 后按 Flash 单价记账", () => {
+test("v4-pro 于 2026-09-14 之后仍按 Pro 单价记账", () => {
   const ledger = makeLedger(10);
   const time = bj(2026, 9, 14, 20, 0); // 周一 20:00 空闲时段
   ledger.record({
@@ -223,8 +223,38 @@ test("模型名路由：v4-pro 于 2026-09-14 12:00 后按 Flash 单价记账", 
     model: "deepseek-v4-pro",
     ...ledger.price("deepseek-v4-pro", "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
   });
-  assert.equal(ledger.sessionView("sRoute").cost, 1); // 空闲 Flash 输入价 ¥1 / 1M
-  assert.equal(ledger.bySession.get("sRoute").messages.get("m1").billedAs, "deepseek-flash");
+  assert.equal(ledger.sessionView("sRoute").cost, 4.5); // 空闲 Pro 输入价 ¥4.5 / 1M
+  assert.equal(ledger.bySession.get("sRoute").messages.get("m1").billedAs, "deepseek-v4-pro");
+});
+
+test("价格更新会把保留明细中错按 Flash 的 Pro 费用重算为 Pro", () => {
+  const ledger = makeLedger(10);
+  const time = bj(2026, 9, 14, 20, 0);
+  const oldPricing = {
+    hash: "cancelled-pro-retirement",
+    at: (model, at) => priceAt(model, at, {
+      timezone, peakWindows, peakWeekdays,
+      policies: [...policies, {
+        since: "2026-09-14T12:00:00+08:00",
+        routes: { "deepseek-v4-pro": "deepseek-flash" }
+      }]
+    })
+  };
+  ledger.record({
+    sessionId: "sOldPro", messageId: "m1", time,
+    provider: "deepseek", model: "deepseek-v4-pro",
+    ...ledger.price("deepseek-v4-pro", "deepseek", time,
+      { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, oldPricing)
+  });
+  ledger.pricingHash = oldPricing.hash;
+  assert.equal(ledger.sessionView("sOldPro").cost, 1);
+  ledger.reprice(P1);
+  const view = ledger.sessionView("sOldPro");
+  assert.equal(view.cost, 4.5);
+  assert.equal(view.costUsd, 0.66);
+  assert.equal(view.calls, 1);
+  assert.equal(view.inputTokens, 1_000_000);
+  assert.equal(ledger.detail("sOldPro").lastBilledAs, "deepseek-v4-pro");
 });
 
 test("写盘期间的新记录会在同一轮 flush 中保存", async () => {
@@ -256,7 +286,7 @@ test("写盘期间的新记录会在同一轮 flush 中保存", async () => {
 
 test("detail：按模型与时段聚合，并给出首末计费点（含路由后的计费名）", () => {
   const ledger = makeLedger(10);
-  const peakTime = bj(2026, 9, 10, 10, 0); // 周四 10:00 高峰
+  const peakTime = bj(2026, 9, 10, 15, 0); // 周四 15:00 高峰
   const offTime = bj(2026, 9, 10, 20, 0); // 周四 20:00 空闲
   const bill = (messageId, model, time) => ledger.record({
     sessionId: "sDetail",
@@ -267,7 +297,7 @@ test("detail：按模型与时段聚合，并给出首末计费点（含路由�
     ...ledger.price(model, "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
   });
   bill("m1", "deepseek-flash", peakTime);
-  bill("m2", "deepseek-v4-pro", offTime); // 2026-09-14 之前：v4-pro 仍按自己的价格计费
+  bill("m2", "deepseek-v4-pro", offTime); // v4-pro 保持独立定价
 
   const detail = ledger.detail("sDetail");
   assert.equal(detail.calls, 2);
@@ -294,17 +324,17 @@ test("detail：按模型与时段聚合，并给出首末计费点（含路由�
 
 test("detail：路由生效后同一次请求的模型名与实际计费名分列保留", () => {
   const ledger = makeLedger(10);
-  const time = bj(2026, 9, 14, 20, 0); // 周一 20:00：v4-pro 已路由至 V4.1 Flash
+  const time = bj(2026, 9, 14, 20, 0); // 周一 20:00：旧 Flash 名称路由至 V4.1 Flash
   ledger.record({
     sessionId: "sRouted",
     messageId: "m1",
     time,
     provider: "deepseek",
-    model: "deepseek-v4-pro",
-    ...ledger.price("deepseek-v4-pro", "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
+    model: "deepseek-v4-flash",
+    ...ledger.price("deepseek-v4-flash", "deepseek", time, { inputTokens: 1_000_000, cacheReadTokens: 0, outputTokens: 0 }, P1)
   });
   const detail = ledger.detail("sRouted");
-  assert.equal(detail.models[0].model, "deepseek-v4-pro");
+  assert.equal(detail.models[0].model, "deepseek-v4-flash");
   assert.equal(detail.models[0].billedAs, "deepseek-flash");
   assert.equal(detail.models[0].cost, 1); // 空闲 Flash 输入价 ¥1 / 1M
 });

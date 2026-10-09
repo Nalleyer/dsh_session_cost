@@ -1,7 +1,7 @@
 # dsh-session-cost
 
-DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏（stats 行）的右端**追加一枚
-可点击的「本会话消耗」角标，按 DeepSeek 官方政策（含峰谷定价）实时计费，人民币 / 美元随界面
+DeepSeek Harness Desktop / Web 插件：在聊天界面**底部默认信息栏（stats 行）的右端**追加一枚
+可点击的「本会话消耗」角标，按 DeepSeek API 公开价格（含峰谷定价）估算费用，人民币 / 美元随界面
 语言切换；**点开角标展开详细菜单**：当前计价时段与单价、下一次峰谷切换、按模型 / 按时段的
 用量与费用。
 
@@ -10,6 +10,77 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏�
 > 只落在底部信息栏那一行里。支持官方在售及兼容期内的模型：`deepseek-flash`（V4.1 Flash）、
 > `deepseek-v4-pro`，以及已下线但仍可调用的旧名 `deepseek-v4-flash` /
 > `deepseek-v4-flash-vision-exp`（官方将旧名请求路由至 V4.1 Flash，按 Flash 单价计费）。
+
+## 安装
+
+### 官方 Desktop
+
+在侧栏打开「插件（Plugins）」，选择「添加插件（Add plugin）」，输入：
+
+```text
+https://github.com/Nalleyer/dsh_session_cost
+```
+
+安装完成后启用 `dsh-session-cost`，完整退出 Desktop（包括托盘进程），再重新打开。
+Desktop 使用 `desktop` profile；装进 `web` profile 的插件不会自动在 Desktop 中启用。
+
+升级时按当前插件页提供的操作卸载后重装，确认详情页显示所需版本。GitHub 安装读取远端仓库；
+本地尚未推送的改动不会被安装。本插件不依赖 npm 发布。
+
+### Web / CLI
+
+```bash
+dsh plugin --profile web add https://github.com/Nalleyer/dsh_session_cost
+```
+
+安装后重启运行该 profile 的 DSH host。CLI 和 Desktop 可能来自不同版本的安装，
+维护 Desktop 时优先使用其内置 CLI，或直接使用上述 Desktop 插件页。
+
+### 本地开发
+
+先在仓库运行 `npm ci`，再通过官方 CLI 链接本地包。Windows 助手会调用
+`dsh plugin --profile <name> add link:<checkout>`，由 DSH 管理 profile 和组合包，
+无需手工修改 profile 清单或创建 junction。
+
+```powershell
+# Web：使用 PATH 中的 dsh
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
+
+# 官方 Desktop（默认 Windows 安装目录；自定义安装时换成实际路径）
+$desktopCli = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile desktop -DshCommand $desktopCli
+```
+
+自定义用户数据目录可加 `-DshHome <path>`。该参数只在安装命令执行期间设置
+`DSH_HOME`，随后恢复原值。源码修改后重启对应 host；Desktop 完整退出后重开，Web 还需刷新页面。
+
+## 兼容性与安装后测试
+
+2026-10-09 已核对官方 Desktop `0.2.0-rc.2` 的内置模块，并在隔离环境验证：
+
+- host：真实 Cordis / WebServer 的插件初始化、`session/event` 记账、HTTP 明细端点和卸载。
+- client：真实 ClientModuleSystem / SlotRegistry / LocaleRuntime 的注册和卸载；
+  用 jsdom 与 React 18.3.1 验证角标挂入 stats 行、展开明细和 Esc 关闭，定位使用插件自带实现。
+- 官方客户端源码仍提供 `conversation.composer.dock`、`[data-composer-stats]`、
+  `react-dom` 和所需 locale 接口。
+
+这些检查通过后，无需修改插件的 host/client 接口。`dsh.client.platform` 仍为 `web`：
+它描述客户端模块平台，Desktop 的 profile 名称是 `desktop`，两者不应混用。
+Headless 没有聊天界面，不能显示角标。
+
+本轮尚未通过 Desktop 的 GitHub 安装入口进行实际验收，也未验证原生窗口的布局和官方定位 hook。
+远端更新后，用上述官方方式安装 `1.2.1`，检查：
+
+1. 新建会话，用 `deepseek-flash` 完成一次回复；5 秒内出现费用角标，点击可展开明细，
+   外部点击或 Esc 可关闭。
+2. 若使用 `deepseek-v4-pro`，明细应保持 Pro 计费名与 Pro 单价。
+3. 切换中英文界面，自动币种随之切换；切换会话不应短暂显示上一会话的金额。
+4. 完整退出后重开，已记录金额保留；继续聊天时请求数增加，旧记录不重复累计。
+
+安装前的聊天记录不会自动补算。插件订阅运行期间的会话事件；
+旧会话尚无插件账本记录时不显示角标，继续对话产生用量后才出现。
+账本默认保存在同一 `DSH_HOME` 的 `storages/session-cost.json`；
+从 Web 切到 Desktop 只有使用同一数据目录才会读取同一份账本。
 
 ## 效果
 
@@ -52,16 +123,23 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏�
   - **空闲**（其余时段，含**周末全天**）：单价为高峰的**一半**。
 - **模型名路由**：官方下线模型后常保留旧模型名的兼容期，此时请求由新模型提供服务、并按
   新模型单价计费。路由写在数据文件的 `policies[].routes`（`{ 请求名: 实际计费名 }`）：
-  - 2026-09-10 起：`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` → `deepseek-flash`
-  - 2026-09-14 12:00 起（至 V4.1 Pro 上线前）：`deepseek-v4-pro` → `deepseek-flash`
+  - 2026-09-10 12:00 起：`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` → `deepseek-flash`
+  - `deepseek-v4-pro` 继续按 Pro 单价计费，未路由到 Flash；以[当前官方价格说明](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)为准。
   被路由的名字**不重复写价**，单价由目标模型在政策链上的价格行决定，避免同一组数字多处维护。
 - 政策链继承：重启后，保留的消息明细按各自时刻重新计价（重启自愈）。超过
-  `maxMessagesPerSession` 的裁剪历史只保留当时的聚合金额，不再逐条重算。
+  `maxMessagesPerSession` 的裁剪历史只保留当时的聚合金额，不再逐条重算。升级到 `1.2.1` 后，
+  保留明细中曾按 Flash 错算的 Pro 消息会自动改按 Pro 定价；已裁剪的聚合无法恢复逐条用量。
 - **价格数据在 `lib/pricing-data.json`**：官方调价时，插件作者直接更新该文件（无需改逻辑代码）。
   包含时间轴（`policies`，含可选 `routes`）、峰谷窗口（`peakWindows`）、高峰星期
   （`peakWeekdays`，周一 1 … 周日 7；缺省/空数组表示不限星期）、支持的模型（`models`），
   以及核对来源（`source`）。
 - 普通用户**不可**覆盖价格：不提供 `prices` / `policyOverrides` 等覆盖入口。
+
+费用来自事件中的 token 用量和价格表，表示 API 标价估算，不等同于供应商实际扣款。
+订阅套餐、第三方渠道折扣和本地模型的实际费用不在此估算中；同名模型也按公开 API 标价展示。
+当前峰谷规则只处理星期与每日时段，尚未单独处理中国法定节假日。
+[英文官方价格页](https://api-docs.deepseek.com/quick_start/pricing/)将这些节假日列为空闲时段，
+因此节假日落在工作日高峰窗口时，本插件的估算可能偏高。
 
 ## 人民币 / 美元
 
@@ -70,27 +148,6 @@ DeepSeek Harness（`dsh web`）插件：在聊天界面**底部默认信息栏�
 返回 `cost` 与 `costUsd`，由客户端按上述规则择一展示；展示符号取配置
 `symbol` / `symbolUsd`（默认 `¥` / `$`）。界面文案随语言切换（zh / en 字典注册进官方
 locale 服务）。
-
-## 安装
-
-插件是一个标准 **DSH 组合包（bundle）**（`dsh.bundle.patch` 指向包内 `cordis.patch.yml`）。
-
-```bash
-# 从 GitHub 安装（上传后）
-dsh plugin --profile web add https://github.com/Nalleyer/dsh_session_cost
-
-# 或从 npm 安装（发布后）
-dsh plugin --profile web add dsh-session-cost
-
-# 本地开发：把 checkout 以 junction 链接进已初始化的 profile（无需先上 GitHub）
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
-```
-
-- 本地安装助手要求目标 profile 已由 DSH 初始化；全新环境先运行一次 `dsh web`，再执行脚本。
-- 本地安装脚本会创建 `$DSH_HOME/profiles/web/node_modules/dsh-session-cost` 指向本仓库，
-  并把 `dsh-session-cost` 加入 profile 的 `dsh.profile.bundles`。
-- 安装后**重启 `dsh web`** 生效。
-- 浏览器端 bundle 为手写模块（与 DSH 官方 client 插件同格式），修改后**刷新页面 + 重启 `dsh web`** 生效；host 端修改需重启。
 
 ## 端点（默认仅回环，host 侧）
 
@@ -140,7 +197,7 @@ DOM 结构与样式；放在 `tools/` 而不是 `test/`，因为 `node --test` �
 
 ```
 lib/pricing.js        计费引擎（纯函数，无价格数据）
-lib/pricing-data.json 价格数据（官方三模型的政策时间表 + 峰谷窗口，作者维护）
+lib/pricing-data.json 价格数据（支持模型的政策时间表 + 峰谷窗口，作者维护）
 lib/index.js          host 侧：记账 + /session-cost 端点（概览 / 明细）
 lib/client.js         浏览器侧：信息栏角标（门户进官方 stats 行）+ 详细菜单
 cordis.patch.yml      组合包配置层

@@ -3,7 +3,7 @@
  *
  * 验证 lib/pricing.js（纯函数引擎）结合 lib/pricing-data.json（价格数据）的核心行为：
  * 峰谷判定（含**周一至周五**限制）、按消息时刻取价、DeepSeek 官方模型名路由
- * （v4-flash 系列 → deepseek-flash；2026-09-14 12:00 起 v4-pro → deepseek-flash）、
+ * （v4-flash 系列 → deepseek-flash；v4-pro 保持 Pro 定价）、
  * 双币种费用计算。运行：node --test
  */
 import { test } from "node:test";
@@ -36,10 +36,10 @@ const T_PEAK = bj(2026, 8, 17, 10, 0);       // 周一 10:00 ∈ [9,12) 高峰
 const T_PEAK2 = bj(2026, 8, 17, 15, 0);      // 周一 15:00 ∈ [14,18) 高峰
 const T_OFF = bj(2026, 8, 17, 20, 0);        // 周一 20:00 空闲
 const T_WEEKEND = bj(2026, 9, 12, 10, 0);    // 周六 10:00：窗口内但周末 → 空闲
-const T_V41_PEAK = bj(2026, 9, 10, 10, 0);   // V4.1 新价生效后的高峰（周四）
+const T_V41_PEAK = bj(2026, 9, 10, 15, 0);   // V4.1 新价生效后的高峰（周四）
 const T_V41_OFF = bj(2026, 9, 10, 20, 0);    // V4.1 新价生效后的空闲
-const T_PRO_LAST = bj(2026, 9, 14, 11, 0);   // V4 Pro 路由生效前（周一 11:00，高峰）
-const T_PRO_ROUTED = bj(2026, 9, 14, 12, 0); // V4 Pro 全量路由至 V4.1 Flash 的起点
+const T_PRO_PEAK = bj(2026, 9, 14, 11, 0);   // 周一 11:00 高峰，Pro 保持独立定价
+const T_PRO_OFF = bj(2026, 9, 14, 12, 0); // 周一 12:00 空闲，Pro 保持独立定价
 
 /** 某政策是否为该模型自带价格行（与路由区分）。 */
 const hasRow = (policy, name) =>
@@ -188,23 +188,26 @@ test("priceAt：已下线旧名 v4-flash / v4-flash-vision-exp 按 V4.1 Flash �
   assert.equal(legacy.cny.input, 3);
 });
 
-test("priceAt：2026-09-14 12:00 起 v4-pro 全量路由至 V4.1 Flash", () => {
-  const before = priceAt("deepseek-v4-pro", T_PRO_LAST, opts);
+test("priceAt：Pro 在 2026-09-14 之后保持独立定价", () => {
+  const before = priceAt("deepseek-v4-pro", T_PRO_PEAK, opts);
   assert.equal(before.billedAs, "deepseek-v4-pro");
-  assert.equal(before.mode, "peak");
-  assert.equal(before.cny.input, 9);
-  assert.equal(before.cny.output, 27);
+  assert.deepEqual(before.cny, { input: 9, cacheRead: 0.3, output: 27 });
+  for (const time of [T_PRO_OFF, bj(2026, 9, 14, 20, 0)]) {
+    const pro = priceAt("deepseek-v4-pro", time, opts);
+    assert.equal(pro.billedAs, "deepseek-v4-pro");
+    assert.equal(pro.mode, "offPeak");
+    assert.deepEqual(pro.cny, { input: 4.5, cacheRead: 0.15, output: 13.5 });
+    assert.deepEqual(pro.usd, { input: 0.66, cacheRead: 0.022, output: 1.98 });
+  }
+});
 
-  const after = priceAt("deepseek-v4-pro", T_PRO_ROUTED, opts);
+test("priceAt：Flash 新价与旧名路由在 2026-09-10 12:00 生效", () => {
+  const before = priceAt("deepseek-v4-flash", bj(2026, 9, 10, 11, 59), opts);
+  assert.equal(before.billedAs, "deepseek-v4-flash");
+  assert.deepEqual(before.cny, { input: 3, cacheRead: 0.1, output: 9 });
+  const after = priceAt("deepseek-v4-flash", bj(2026, 9, 10, 12, 0), opts);
   assert.equal(after.billedAs, "deepseek-flash");
-  assert.deepEqual(after.cny, { input: 1, cacheRead: 0.02, output: 4 }); // 12:00 起为空闲时段
-  const flash = priceAt("deepseek-flash", T_PRO_ROUTED, opts);
-  assert.deepEqual(after.cny, flash.cny);
-
-  // 2026-09-10 至 2026-09-14 12:00 之间：v4-pro 单价不变
-  const mid = priceAt("deepseek-v4-pro", T_V41_PEAK, opts);
-  assert.equal(mid.billedAs, "deepseek-v4-pro");
-  assert.equal(mid.cny.input, 9);
+  assert.deepEqual(after.cny, { input: 1, cacheRead: 0.02, output: 4 });
 });
 
 test("priceAt：未点名的模型按 `*` 兜底为零（不误报费用）", () => {

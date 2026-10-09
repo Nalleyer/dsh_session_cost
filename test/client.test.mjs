@@ -105,10 +105,10 @@ function detailPayload(overrides = {}) {
     firstTime: Date.UTC(2026, 8, 10, 1, 0),
     lastTime: Date.UTC(2026, 8, 10, 2, 30),
     lastMode: "peak",
-    lastModel: "deepseek-v4-pro",
+    lastModel: "deepseek-v4-flash",
     lastBilledAs: "deepseek-flash",
     models: [
-      { model: "deepseek-v4-pro", billedAs: "deepseek-flash", calls: 2, cost: 0.12, costUsd: 0.017, inputTokens: 8000, cacheReadTokens: 200000, outputTokens: 3000 },
+      { model: "deepseek-v4-flash", billedAs: "deepseek-flash", calls: 2, cost: 0.12, costUsd: 0.017, inputTokens: 8000, cacheReadTokens: 200000, outputTokens: 3000 },
       { model: "deepseek-flash", billedAs: "deepseek-flash", calls: 1, cost: 0.013545, costUsd: 0.0015, inputTokens: 4000, cacheReadTokens: 28000, outputTokens: 1500 }
     ],
     modes: {
@@ -118,12 +118,12 @@ function detailPayload(overrides = {}) {
     },
     trimmed: { calls: 0, cost: 0, costUsd: 0 },
     pricing: {
-      model: "deepseek-v4-pro",
+      model: "deepseek-v4-flash",
       billedAs: "deepseek-flash",
       mode: "peak",
       cny: { input: 2, cacheRead: 0.04, output: 8 },
       usd: { input: 0.3, cacheRead: 0.006, output: 1.2 },
-      since: "2026-09-14T12:00:00+08:00",
+      since: "2026-09-10T12:00:00+08:00",
       label: "…",
       checkedAt: "2026-09-10",
       source: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
@@ -346,7 +346,7 @@ test("点开角标 → 明细菜单（单价 / 下次切换 / 用量 / 模型路
   assert.match(text, /本会话消耗/);
   assert.match(text, /¥0\.133545/); // 精确金额（标题右侧）
   assert.match(text, /¥2 \/ ¥0\.04 \/ ¥8/); // 当前单价 / 1M tokens
-  assert.match(text, /deepseek-v4-pro → deepseek-flash/); // 兼容路由
+  assert.match(text, /deepseek-v4-flash → deepseek-flash/); // 兼容路由
   assert.match(text, /95%/); // 缓存命中率
   assert.match(text, /12,000/); // 输入 tokens 千分位
   assert.match(text, /228,000/); // 缓存读取

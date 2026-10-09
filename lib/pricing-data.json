@@ -1,8 +1,9 @@
 {
   "source": {
     "pricing": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+    "pricingUsd": "https://api-docs.deepseek.com/quick_start/pricing/",
     "changelog": "https://api-docs.deepseek.com/zh-cn/updates/",
-    "checkedAt": "2026-09-10"
+    "checkedAt": "2026-10-09"
   },
   "timezone": "Asia/Shanghai",
   "peakWindows": [[9, 12], [14, 18]],
@@ -61,7 +62,7 @@
       }
     },
     {
-      "since": "2026-09-10T00:00:00+08:00",
+      "since": "2026-09-10T12:00:00+08:00",
       "label": "DeepSeek-V4.1-Flash 发布：新模型名 deepseek-flash 上线并同步降价；v4-flash / v4-flash-vision-exp 下线，请求暂路由至 V4.1 Flash 并按 Flash 单价计费（deepseek-v4-pro 单价不变，沿用 2026-08-17 政策）",
       "peak": {
         "deepseek-flash": {
@@ -78,13 +79,6 @@
       "routes": {
         "deepseek-v4-flash": "deepseek-flash",
         "deepseek-v4-flash-vision-exp": "deepseek-flash"
-      }
-    },
-    {
-      "since": "2026-09-14T12:00:00+08:00",
-      "label": "有序下线 V4 Pro：北京时间 2026-09-14 12:00 起（至 V4.1 Pro 上线前）deepseek-v4-pro 的请求全部路由至 V4.1 Flash，按 Flash 单价计费",
-      "routes": {
-        "deepseek-v4-pro": "deepseek-flash"
       }
     }
   ]
